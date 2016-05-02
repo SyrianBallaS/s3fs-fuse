@@ -17,9 +17,10 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 ######################################################################
+ACLOCAL_AMFLAGS = -I m4
 SUBDIRS=src test doc
 
-EXTRA_DIST=doc default_commit_hash
+EXTRA_DIST=autogen.sh doc default_commit_hash
 
 dist-hook:
 	rm -rf `find $(distdir)/doc -type d -name .svn`

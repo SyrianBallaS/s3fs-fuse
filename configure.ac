@@ -21,10 +21,13 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.59)
 AC_INIT(s3fs, 1.79)
-AC_CONFIG_HEADER([config.h])
+AC_CONFIG_HEADERS(config.h)
 
-AC_CANONICAL_SYSTEM
-AM_INIT_AUTOMAKE([foreign])
+AC_CANONICAL_TARGET
+AC_CONFIG_AUX_DIR(config)
+AC_CONFIG_SRCDIR(src)
+
+AM_INIT_AUTOMAKE
 
 AC_PROG_CXX
 AC_PROG_CC
@@ -228,9 +231,87 @@ dnl ----------------------------------------------
 dnl malloc_trim function
 AC_CHECK_FUNCS([malloc_trim])
 
+dnl ftruncate function
+AC_CHECK_FUNCS([ftruncate])
+
+dnl memset function
+AC_CHECK_FUNCS([memset])
+
+dnl mkdir function
+AC_CHECK_FUNCS([mkdir])
+
+dnl rmdir function
+AC_CHECK_FUNCS([rmdir])
+
+dnl select function
+AC_CHECK_FUNCS([select])
+
+dnl strcasecmp function
+AC_CHECK_FUNCS([strcasecmp])
+
+dnl strchr function
+AC_CHECK_FUNCS([strchr])
+
+dnl strdup function
+AC_CHECK_FUNCS([strdup])
+
+dnl strerror function
+AC_CHECK_FUNCS([strerror])
+
+dnl strncasecmp function
+AC_CHECK_FUNCS([strncasecmp])
+
+dnl strstr function
+AC_CHECK_FUNCS([strstr])
+
+dnl utime function
+AC_CHECK_FUNCS([utime])
+
 dnl clock_gettime function(osx)
 AC_SEARCH_LIBS([clock_gettime],[rt posix4]) 
 AC_CHECK_FUNCS([clock_gettime])
+
+dnl ----------------------------------------------
+dnl check headers
+dnl ----------------------------------------------
+dnl fcntl header
+AC_CHECK_HEADERS([fcntl.h])
+
+dnl malloc header
+AC_CHECK_HEADERS([malloc.h])
+
+dnl stddef header
+AC_CHECK_HEADERS([stddef.h])
+
+dnl stdint header
+AC_CHECK_HEADERS([stdint.h])
+
+dnl stdlib header
+AC_CHECK_HEADERS([stdlib.h])
+
+dnl string header
+AC_CHECK_HEADERS([string.h]) 
+
+dnl sys/file header
+AC_CHECK_HEADERS([sys/file.h])
+
+dnl sys/time header
+AC_CHECK_HEADERS([sys/time.h])
+
+dnl syslog header
+AC_CHECK_HEADERS([syslog.h])
+
+dnl unistd header
+AC_CHECK_HEADERS([unistd.h])
+
+dnl stdbool header
+AC_CHECK_HEADER_STDBOOL
+
+dnl ----------------------------------------------
+dnl check members
+dnl ----------------------------------------------
+dnl stat.st_blksize members
+AC_CHECK_MEMBERS([struct stat.st_blksize]) 
 
 dnl ----------------------------------------------
 dnl check symbols/macros/enums
@@ -255,10 +336,41 @@ AC_COMPILE_IFELSE(
   ]
 )
 
+
+dnl ----------------------------------------------
+dnl AC_FUNCs
+dnl ----------------------------------------------
+AC_FUNC_LSTAT_FOLLOWS_SLASHED_SYMLINK
+AC_FUNC_MALLOC
+AC_FUNC_REALLOC
+
+dnl ----------------------------------------------
+dnl AC_PROGs
+dnl ----------------------------------------------
+AC_PROG_LN_S
+
+dnl ----------------------------------------------
+dnl AC_STRUCTs
+dnl ----------------------------------------------
+AC_STRUCT_ST_BLOCKS
+
+dnl ----------------------------------------------
+dnl AC_TYPEs
+dnl ----------------------------------------------
+AC_TYPE_MODE_T
+AC_TYPE_OFF_T 
+AC_TYPE_SIZE_T 
+AC_TYPE_SSIZE_T
+AC_TYPE_UID_T
+
 dnl ----------------------------------------------
 dnl output files
 dnl ----------------------------------------------
-AC_CONFIG_FILES(Makefile src/Makefile test/Makefile doc/Makefile)
+AC_CONFIG_FILES([Makefile 
+		 src/Makefile 
+		 test/Makefile 
+		 doc/Makefile
+])
 
 dnl ----------------------------------------------
 dnl short commit hash
