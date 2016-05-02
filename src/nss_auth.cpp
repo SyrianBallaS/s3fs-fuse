@@ -182,7 +182,7 @@ unsigned char* s3fs_md5hexsum(int fd, off_t start, ssize_t size)
       break;
     }else if(-1 == bytes){
       // error
-      S3FS_PRN_ERR("file read error(%d)", errno);
+      DPRNNN("file read error(%d)", errno);
       return NULL;
     }
     PK11_DigestOp(md5ctx, buf, bytes);
@@ -262,8 +262,7 @@ unsigned char* s3fs_sha256hexsum(int fd, off_t start, ssize_t size)
       break;
     }else if(-1 == bytes){
       // error
-      S3FS_PRN_ERR("file read error(%d)", errno);
-      PK11_DestroyContext(sha256ctx, PR_TRUE);
+      DPRNNN("file read error(%d)", errno);
       return NULL;
     }
     PK11_DigestOp(sha256ctx, buf, bytes);

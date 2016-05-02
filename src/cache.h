@@ -17,7 +17,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
-
 #ifndef S3FS_CACHE_H_
 #define S3FS_CACHE_H_
 
@@ -27,18 +26,15 @@
 // Struct
 //
 struct stat_cache_entry {
-  struct stat       stbuf;
-  unsigned long     hit_count;
-  struct timespec   cache_date;
-  headers_t         meta;
-  bool              isforce;
-  bool              noobjcache;  // Flag: cache is no object for no listing.
-  unsigned long     notruncate;  // 0<:   not remove automatically at checking truncate
+  struct stat   stbuf;
+  unsigned long hit_count;
+  time_t        cache_date;
+  headers_t     meta;
+  bool          isforce;
+  bool          noobjcache;  // Flag: cache is no object for no listing.
 
-  stat_cache_entry() : hit_count(0), isforce(false), noobjcache(false), notruncate(0L) {
+  stat_cache_entry() : hit_count(0), cache_date(0), isforce(false), noobjcache(false) {
     memset(&stbuf, 0, sizeof(struct stat));
-    cache_date.tv_sec  = 0;
-    cache_date.tv_nsec = 0;
     meta.clear();
   }
 };
@@ -60,15 +56,15 @@ class StatCache
     bool          IsCacheNoObject;
 
   private:
-    StatCache();
-    ~StatCache();
-
     void Clear(void);
     bool GetStat(std::string& key, struct stat* pst, headers_t* meta, bool overcheck, const char* petag, bool* pisforce);
     // Truncate stat cache
     bool TruncateCache(void);
 
   public:
+    StatCache();
+    ~StatCache();
+
     // Reference singleton
     static StatCache* getStatCacheData(void) {
       return &singleton;
@@ -113,10 +109,7 @@ class StatCache
     bool AddNoObjectCache(std::string& key);
 
     // Add stat cache
-    bool AddStat(std::string& key, headers_t& meta, bool forcedir = false, bool no_truncate = false);
-
-    // Change no truncate flag
-    void ChangeNoTruncateFlag(std::string key, bool no_truncate);
+    bool AddStat(std::string& key, headers_t& meta, bool forcedir = false);
 
     // Delete stat cache
     bool DelStat(const char* key);

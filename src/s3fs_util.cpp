@@ -41,7 +41,6 @@
 #include "s3fs_util.h"
 #include "string_util.h"
 #include "s3fs.h"
-#include "s3fs_auth.h"
 
 using namespace std;
 
@@ -58,20 +57,6 @@ string get_realpath(const char *path) {
   realpath += path;
 
   return realpath;
-}
-
-inline headers_t::const_iterator find_content_type(headers_t& meta)
-{
-  headers_t::const_iterator iter;
-
-  if(meta.end() == (iter = meta.find("Content-Type"))){
-    if(meta.end() == (iter = meta.find("Content-type"))){
-      if(meta.end() == (iter = meta.find("content-type"))){
-        iter = meta.find("content-Type");
-      }
-    }
-  }
-  return iter;
 }
 
 //-------------------------------------------------------------------
@@ -243,31 +228,11 @@ bool S3ObjList::IsDir(const char* name) const
   return ps3obj->is_dir;
 }
 
-bool S3ObjList::GetLastName(std::string& lastname) const
-{
-  bool result = false;
-  lastname = "";
-  for(s3obj_t::const_iterator iter = objects.begin(); iter != objects.end(); ++iter){
-    if((*iter).second.orgname.length()){
-      if(0 > strcmp(lastname.c_str(), (*iter).second.orgname.c_str())){
-        lastname = (*iter).second.orgname;
-        result = true;
-      }
-    }else{
-      if(0 > strcmp(lastname.c_str(), (*iter).second.normalname.c_str())){
-        lastname = (*iter).second.normalname;
-        result = true;
-      }
-    }
-  }
-  return result;
-}
-
 bool S3ObjList::GetNameList(s3obj_list_t& list, bool OnlyNormalized, bool CutSlash) const
 {
   s3obj_t::const_iterator iter;
 
-  for(iter = objects.begin(); objects.end() != iter; ++iter){
+  for(iter = objects.begin(); objects.end() != iter; iter++){
     if(OnlyNormalized && 0 != (*iter).second.normalname.length()){
       continue;
     }
@@ -289,7 +254,7 @@ bool S3ObjList::MakeHierarchizedList(s3obj_list_t& list, bool haveSlash)
   s3obj_h_t::iterator hiter;
   s3obj_list_t::const_iterator liter;
 
-  for(liter = list.begin(); list.end() != liter; ++liter){
+  for(liter = list.begin(); list.end() != liter; liter++){
     string strtmp = (*liter);
     if(1 < strtmp.length() && '/' == strtmp[strtmp.length() - 1]){
       strtmp = strtmp.substr(0, strtmp.length() - 1);
@@ -346,7 +311,7 @@ MVNODE *create_mvnode(const char *old_path, const char *new_path, bool is_dir, b
     return NULL;
   }
 
-  if(NULL == (p_new_path = strdup(new_path))){
+  if(NULL == (p_new_path = strdup(new_path))){ 
     free(p);
     free(p_old_path);
     printf("create_mvnode: could not allocation memory for p_new_path\n");
@@ -364,7 +329,7 @@ MVNODE *create_mvnode(const char *old_path, const char *new_path, bool is_dir, b
 }
 
 //
-// Add sorted MVNODE data(Ascending order)
+// Add sorted MVNODE data(Ascending order) 
 //
 MVNODE *add_mvnode(MVNODE** head, MVNODE** tail, const char *old_path, const char *new_path, bool is_dir, bool normdir)
 {
@@ -439,14 +404,51 @@ void free_mvnodes(MVNODE *head)
 //-------------------------------------------------------------------
 // Class AutoLock
 //-------------------------------------------------------------------
-AutoLock::AutoLock(pthread_mutex_t* pmutex) : auto_mutex(pmutex)
+AutoLock::AutoLock(pthread_mutex_t* pmutex) : auto_mutex(pmutex), is_locked(false)
 {
-  pthread_mutex_lock(auto_mutex);
+  Lock();
 }
 
 AutoLock::~AutoLock()
 {
-  pthread_mutex_unlock(auto_mutex);
+  Unlock();
+}
+
+bool AutoLock::Lock(void)
+{
+  if(!auto_mutex){
+    return false;
+  }
+  if(is_locked){
+    // already locked
+    return true;
+  }
+  try{
+    pthread_mutex_lock(auto_mutex);
+    is_locked = true;
+  }catch(exception& e){
+    is_locked = false;
+    return false;
+  }
+  return true;
+}
+
+bool AutoLock::Unlock(void)
+{
+  if(!auto_mutex){
+    return false;
+  }
+  if(!is_locked){
+    // already unlocked
+    return true;
+  }
+  try{
+    pthread_mutex_unlock(auto_mutex);
+    is_locked = false;
+  }catch(exception& e){
+    return false;
+  }
+  return true;
 }
 
 //-------------------------------------------------------------------
@@ -456,27 +458,26 @@ AutoLock::~AutoLock()
 string get_username(uid_t uid)
 {
   static size_t maxlen = 0;	// set onece
+  int result;
   char* pbuf;
   struct passwd pwinfo;
   struct passwd* ppwinfo = NULL;
 
   // make buffer
   if(0 == maxlen){
-    long res = sysconf(_SC_GETPW_R_SIZE_MAX);
-    if(0 > res){
-      S3FS_PRN_WARN("could not get max pw length.");
+    if(0 > (maxlen = (size_t)sysconf(_SC_GETPW_R_SIZE_MAX))){
+      DPRNNN("could not get max pw length.");
       maxlen = 0;
       return string("");
     }
-    maxlen = res;
   }
   if(NULL == (pbuf = (char*)malloc(sizeof(char) * maxlen))){
-    S3FS_PRN_CRIT("failed to allocate memory.");
+    DPRNCRIT("failed to allocate memory.");
     return string("");
   }
-  // get group information
-  if(0 != getpwuid_r(uid, &pwinfo, pbuf, maxlen, &ppwinfo)){
-    S3FS_PRN_WARN("could not get pw information.");
+  // get group infomation
+  if(0 != (result = getpwuid_r(uid, &pwinfo, pbuf, maxlen, &ppwinfo))){
+    DPRNNN("could not get pw infomation.");
     free(pbuf);
     return string("");
   }
@@ -500,21 +501,19 @@ int is_uid_inculde_group(uid_t uid, gid_t gid)
 
   // make buffer
   if(0 == maxlen){
-    long res = sysconf(_SC_GETGR_R_SIZE_MAX);
-    if(0 > res){
-      S3FS_PRN_ERR("could not get max name length.");
+    if(0 > (maxlen = (size_t)sysconf(_SC_GETGR_R_SIZE_MAX))){
+      DPRNNN("could not get max name length.");
       maxlen = 0;
       return -ERANGE;
     }
-    maxlen = res;
   }
   if(NULL == (pbuf = (char*)malloc(sizeof(char) * maxlen))){
-    S3FS_PRN_CRIT("failed to allocate memory.");
+    DPRNCRIT("failed to allocate memory.");
     return -ENOMEM;
   }
-  // get group information
+  // get group infomation
   if(0 != (result = getgrgid_r(gid, &ginfo, pbuf, maxlen, &pginfo))){
-    S3FS_PRN_ERR("could not get group information.");
+    DPRNNN("could not get group infomation.");
     free(pbuf);
     return -result;
   }
@@ -560,71 +559,14 @@ string mybasename(string path)
 // mkdir --parents
 int mkdirp(const string& path, mode_t mode)
 {
-  string       base;
-  string       component;
+  string base;
+  string component;
   stringstream ss(path);
   while (getline(ss, component, '/')) {
     base += "/" + component;
-
-    struct stat st;
-    if(0 == stat(base.c_str(), &st)){
-      if(!S_ISDIR(st.st_mode)){
-        return EPERM;
-      }
-    }else{
-      if(0 != mkdir(base.c_str(), mode)){
-        return errno;
-     }
-    }
+    mkdir(base.c_str(), mode);
   }
   return 0;
-}
-
-bool check_exist_dir_permission(const char* dirpath)
-{
-  if(!dirpath || '\0' == dirpath[0]){
-    return false;
-  }
-
-  // exists
-  struct stat st;
-  if(0 != stat(dirpath, &st)){
-    if(ENOENT == errno){
-      // dir does not exitst
-      return true;
-    }
-    if(EACCES == errno){
-      // could not access directory
-      return false;
-    }
-    // somthing error occured
-    return false;
-  }
-
-  // check type
-  if(!S_ISDIR(st.st_mode)){
-    // path is not directory
-    return false;
-  }
-
-  // check permission
-  uid_t myuid = geteuid();
-  if(myuid == st.st_uid){
-    if(S_IRWXU != (st.st_mode & S_IRWXU)){
-      return false;
-    }
-  }else{
-    if(1 == is_uid_inculde_group(myuid, st.st_gid)){
-      if(S_IRWXG != (st.st_mode & S_IRWXG)){
-        return false;
-      }
-    }else{
-      if(S_IRWXO != (st.st_mode & S_IRWXO)){
-        return false;
-      }
-    }
-  }
-  return true;
 }
 
 bool delete_files_in_dir(const char* dir, bool is_remove_own)
@@ -633,7 +575,7 @@ bool delete_files_in_dir(const char* dir, bool is_remove_own)
   struct dirent* dent;
 
   if(NULL == (dp = opendir(dir))){
-    S3FS_PRN_ERR("could not open dir(%s) - errno(%d)", dir, errno);
+    DPRNINFO("could not open dir(%s) - errno(%d)", dir, errno);
     return false;
   }
 
@@ -646,20 +588,20 @@ bool delete_files_in_dir(const char* dir, bool is_remove_own)
     fullpath         += dent->d_name;
     struct stat st;
     if(0 != lstat(fullpath.c_str(), &st)){
-      S3FS_PRN_ERR("could not get stats of file(%s) - errno(%d)", fullpath.c_str(), errno);
+      DPRN("could not get stats of file(%s) - errno(%d)", fullpath.c_str(), errno);
       closedir(dp);
       return false;
     }
     if(S_ISDIR(st.st_mode)){
       // dir -> Reentrant
       if(!delete_files_in_dir(fullpath.c_str(), true)){
-        S3FS_PRN_ERR("could not remove sub dir(%s) - errno(%d)", fullpath.c_str(), errno);
+        DPRNINFO("could not remove sub dir(%s) - errno(%d)", fullpath.c_str(), errno);
         closedir(dp);
         return false;
       }
     }else{
       if(0 != unlink(fullpath.c_str())){
-        S3FS_PRN_ERR("could not remove file(%s) - errno(%d)", fullpath.c_str(), errno);
+        DPRN("could not remove file(%s) - errno(%d)", fullpath.c_str(), errno);
         closedir(dp);
         return false;
       }
@@ -668,7 +610,7 @@ bool delete_files_in_dir(const char* dir, bool is_remove_own)
   closedir(dp);
 
   if(is_remove_own && 0 != rmdir(dir)){
-    S3FS_PRN_ERR("could not remove dir(%s) - errno(%d)", dir, errno);
+    DPRN("could not remove dir(%s) - errno(%d)", dir, errno);
     return false;
   }
   return true;
@@ -728,21 +670,16 @@ mode_t get_mode(headers_t& meta, const char* path, bool checkdir, bool forcedir)
     }
   }
   // Checking the bitmask, if the last 3 bits are all zero then process as a regular
-  // file type (S_IFDIR or S_IFREG), otherwise return mode unmodified so that S_IFIFO,
+  // file type (S_IFDIR or S_IFREG), otherwise return mode unmodified so that S_IFIFO, 
   // S_IFSOCK, S_IFCHR, S_IFLNK and S_IFBLK devices can be processed properly by fuse.
-  if(!(mode & S_IFMT)){
+  if(!(mode & S_IFMT)){ 
     if(!isS3sync){
       if(checkdir){
         if(forcedir){
           mode |= S_IFDIR;
         }else{
-          if(meta.end() != (iter = find_content_type(meta))){
+          if(meta.end() != (iter = meta.find("Content-Type"))){
             string strConType = (*iter).second;
-            // Leave just the mime type, remove any optional parameters (eg charset)
-            string::size_type pos = strConType.find(";");
-            if(string::npos != pos){
-              strConType = strConType.substr(0, pos);
-            }
             if(strConType == "application/x-directory"){
               mode |= S_IFDIR;
             }else if(path && 0 < strlen(path) && '/' == path[strlen(path) - 1]){
@@ -864,7 +801,7 @@ bool is_need_check_obj_detail(headers_t& meta)
   }
   // if there is not Content-Type, or Content-Type is "x-directory",
   // checking is no more.
-  if(meta.end() == (iter = find_content_type(meta))){
+  if(meta.end() == (iter = meta.find("Content-Type"))){
     return false;
   }
   if("application/x-directory" == (*iter).second){
@@ -885,7 +822,7 @@ void show_usage (void)
 void show_help (void)
 {
   show_usage();
-  printf(
+  printf( 
     "\n"
     "Mount an Amazon S3 bucket as a file system.\n"
     "\n"
@@ -913,54 +850,11 @@ void show_help (void)
     "   del_cache (delete local file cache)\n"
     "      - delete local file cache when s3fs starts and exits.\n"
     "\n"
-    "   storage_class (default=\"standard\")\n"
-    "      - store object with specified storage class.  Possible values:\n"
-    "        standard, standard_ia, and reduced_redundancy.\n"
+    "   use_rrs (default is disable)\n"
+    "      - this option makes Amazon's Reduced Redundancy Storage enable.\n"
     "\n"
     "   use_sse (default is disable)\n"
-    "      - Specify three type Amazon's Server-Site Encryption: SSE-S3,\n"
-    "        SSE-C or SSE-KMS. SSE-S3 uses Amazon S3-managed encryption\n"
-    "        keys, SSE-C uses customer-provided encryption keys, and\n"
-    "        SSE-KMS uses the master key which you manage in AWS KMS.\n"
-    "        You can specify \"use_sse\" or \"use_sse=1\" enables SSE-S3\n"
-    "        type(use_sse=1 is old type parameter).\n"
-    "        Case of setting SSE-C, you can specify \"use_sse=custom\",\n"
-    "        \"use_sse=custom:<custom key file path>\" or\n"
-    "        \"use_sse=<custom key file path>\"(only <custom key file path>\n"
-    "        specified is old type parameter). You can use \"c\" for\n"
-    "        short \"custom\".\n"
-    "        The custom key file must be 600 permission. The file can\n"
-    "        have some lines, each line is one SSE-C key. The first line\n"
-    "        in file is used as Customer-Provided Encryption Keys for\n"
-    "        uploading and changing headers etc. If there are some keys\n"
-    "        after first line, those are used downloading object which\n"
-    "        are encrypted by not first key. So that, you can keep all\n"
-    "        SSE-C keys in file, that is SSE-C key history.\n"
-    "        If you specify \"custom\"(\"c\") without file path, you\n"
-    "        need to set custom key by load_sse_c option or AWSSSECKEYS\n"
-    "        environment.(AWSSSECKEYS environment has some SSE-C keys\n"
-    "        with \":\" separator.) This option is used to decide the\n"
-    "        SSE type. So that if you do not want to encrypt a object\n"
-    "        object at uploading, but you need to decrypt encrypted\n"
-    "        object at downloaing, you can use load_sse_c option instead\n"
-    "        of this option.\n"
-    "        For setting SSE-KMS, specify \"use_sse=kmsid\" or\n"
-    "        \"use_sse=kmsid:<kms id>\". You can use \"k\" for short \"kmsid\".\n"
-    "        If you san specify SSE-KMS type with your <kms id> in AWS\n"
-    "        KMS, you can set it after \"kmsid:\"(or \"k:\"). If you\n"
-    "        specify only \"kmsid\"(\"k\"), you need to set AWSSSEKMSID\n"
-    "        environment which value is <kms id>. You must be careful\n"
-    "        about that you can not use the KMS id which is not same EC2\n"
-    "        region.\n"
-    "\n"
-    "   load_sse_c - specify SSE-C keys\n"
-    "        Specify the custom-provided encription keys file path for decrypting\n"
-    "        at duwnloading.\n"
-    "        If you use the custom-provided encription key at uploading, you\n"
-    "        specify with \"use_sse=custom\". The file has many lines, one line\n"
-    "        means one custom key. So that you can keep all SSE-C keys in file,\n"
-    "        that is SSE-C key history. AWSSSECKEYS environment is as same as this\n"
-    "        file contents.\n"
+    "      - this option makes Amazon's Server Site Encryption enable.\n"
     "\n"
     "   public_bucket (default=\"\" which means disabled)\n"
     "      - anonymously mount a public bucket when set to 1\n"
@@ -973,28 +867,26 @@ void show_help (void)
     "      file is the additional HTTP header by file(object) extension.\n"
     "      The configuration file format is below:\n"
     "      -----------\n"
-    "      line         = [file suffix or regex] HTTP-header [HTTP-values]\n"
+    "      line         = [file suffix] HTTP-header [HTTP-values]\n"
     "      file suffix  = file(object) suffix, if this field is empty,\n"
-    "                     it means \"reg:(.*)\".(=all object).\n"
-    "      regex        = regular expression to match the file(object) path.\n"
-    "                     this type starts with \"reg:\" prefix.\n"
+    "                     it means \"*\"(all object).\n"
     "      HTTP-header  = additional HTTP header name\n"
     "      HTTP-values  = additional HTTP header value\n"
     "      -----------\n"
     "      Sample:\n"
     "      -----------\n"
-    "      .gz                    Content-Encoding  gzip\n"
-    "      .Z                     Content-Encoding  compress\n"
-    "      reg:^/MYDIR/(.*)[.]t2$ Content-Encoding  text2\n"
+    "      .gz      Content-Encoding     gzip\n"
+    "      .Z       Content-Encoding     compress\n"
+    "               X-S3FS-MYHTTPHEAD    myvalue\n"
     "      -----------\n"
     "      A sample configuration file is uploaded in \"test\" directory.\n"
     "      If you specify this option for set \"Content-Encoding\" HTTP \n"
     "      header, please take care for RFC 2616.\n"
     "\n"
-    "   connect_timeout (default=\"300\" seconds)\n"
+    "   connect_timeout (default=\"10\" seconds)\n"
     "      - time to wait for connection before giving up\n"
     "\n"
-    "   readwrite_timeout (default=\"60\" seconds)\n"
+    "   readwrite_timeout (default=\"30\" seconds)\n"
     "      - time to wait between read/write activity before giving up\n"
     "\n"
     "   max_stat_cache_size (default=\"1000\" entries (about 4MB))\n"
@@ -1012,10 +904,6 @@ void show_help (void)
     "      and makes performance bad.\n"
     "      You can specify this option for performance, s3fs memorizes \n"
     "      in stat cache that the object(file or directory) does not exist.\n"
-    "\n"
-    "   no_check_certificate\n"
-    "      - server certificate won't be checked against the available \n"
-	"      certificate authorities.\n"
     "\n"
     "   nodnscache (disable dns cache)\n"
     "      - s3fs is always using dns cache, this option make dns cache disable.\n"
@@ -1035,54 +923,28 @@ void show_help (void)
     "      at once. It is necessary to set this value depending on a CPU \n"
     "      and a network band.\n"
     "\n"
-    "   multipart_size (default=\"10\")\n"
-    "      - part size, in MB, for each multipart request.\n"
-    "\n"
-    "   ensure_diskfree (default same multipart_size value)\n"
-    "      - sets MB to ensure disk free space. s3fs makes file for\n"
-    "        downloading, uploading and caching files. If the disk free\n"
-    "        space is smaller than this value, s3fs do not use diskspace\n"
-    "        as possible in exchange for the performance.\n"
-    "\n"
-    "   singlepart_copy_limit (default=\"5120\")\n"
-    "      - maximum size, in MB, of a single-part copy before trying \n"
-    "      multipart copy.\n"
+    "   fd_page_size (default=\"52428800\"(50MB))\n"
+    "      - number of internal management page size for each file discriptor.\n"
+    "      For delayed reading and writing by s3fs, s3fs manages pages which \n"
+    "      is separated from object. Each pages has a status that data is \n"
+    "      already loaded(or not loaded yet).\n"
+    "      This option should not be changed when you don't have a trouble \n"
+    "      with performance.\n"
     "\n"
     "   url (default=\"http://s3.amazonaws.com\")\n"
     "      - sets the url to use to access amazon s3\n"
     "\n"
-    "   endpoint (default=\"us-east-1\")\n"
-    "      - sets the endpoint to use on signature version 4\n"
-    "      If this option is not specified, s3fs uses \"us-east-1\" region as\n"
-    "      the default. If the s3fs could not connect to the region specified\n"
-    "      by this option, s3fs could not run. But if you do not specify this\n"
-    "      option, and if you can not connect with the default region, s3fs\n"
-    "      will retry to automatically connect to the other region. So s3fs\n"
-    "      can know the correct region name, because s3fs can find it in an\n"
-    "      error from the S3 server.\n"
-    "\n"
-    "   sigv2 (default is signature version 4)\n"
-    "      - sets signing AWS requests by sing Signature Version 2\n"
-    "\n"
-    "   mp_umask (default is \"0000\")\n"
-    "      - sets umask for the mount point directory.\n"
-    "      If allow_other option is not set, s3fs allows access to the mount\n"
-    "      point only to the owner. In the opposite case s3fs allows access\n"
-    "      to all users as the default. But if you set the allow_other with\n"
-    "      this option, you can control the permissions of the\n"
-    "      mount point by this option like umask.\n"
-    "\n"
     "   nomultipart (disable multipart uploads)\n"
     "\n"
     "   enable_content_md5 (default is disable)\n"
-    "      - ensure data integrity during writes with MD5 hash.\n"
+    "      - verifying uploaded object without multipart by content-md5 header.\n"
     "\n"
     "   iam_role (default is no role)\n"
     "      - set the IAM Role that will supply the credentials from the \n"
     "      instance meta-data.\n"
     "\n"
-    "   noxmlns (disable registering xml name space)\n"
-    "        disable registering xml name space for response of \n"
+    "   noxmlns (disable registing xml name space)\n"
+    "        disable registing xml name space for response of \n"
     "        ListBucketResult and ListVersionsResult etc. Default name \n"
     "        space is looked up from \"http://s3.amazonaws.com/doc/2006-03-01\".\n"
     "        This option should not be specified now, because s3fs looks up\n"
@@ -1102,28 +964,7 @@ void show_help (void)
     "        option does not use copy-api for all command(ex. chmod, chown,\n"
     "        touch, mv, etc), but this option does not use copy-api for\n"
     "        only rename command(ex. mv). If this option is specified with\n"
-    "        nocopyapi, then s3fs ignores it.\n"
-    "\n"
-    "   use_path_request_style (use legacy API calling style)\n"
-    "        Enble compatibility with S3-like APIs which do not support\n"
-    "        the virtual-host request style, by using the older path request\n"
-    "        style.\n"
-    "\n"
-    "   noua (suppress User-Agent header)\n"
-    "        Usually s3fs outputs of the User-Agent in \"s3fs/<version> (commit\n"
-    "        hash <hash>; <using ssl library name>)\" format.\n"
-    "        If this option is specified, s3fs suppresses the output of the\n"
-    "        User-Agent.\n"
-    "\n"
-    "   dbglevel (default=\"crit\")\n"
-    "        Set the debug message level. set value as crit(critical), err\n"
-    "        (error), warn(warning), info(information) to debug level.\n"
-    "        default debug level is critical. If s3fs run with \"-d\" option,\n"
-    "        the debug level is set information. When s3fs catch the signal\n"
-    "        SIGUSR2, the debug level is bumpup.\n"
-    "\n"
-    "   curldbg - put curl debug message\n"
-    "        Put the debug message from libcurl when this option is specified.\n"
+    "        nocopapi, the s3fs ignores it.\n"
     "\n"
     "FUSE/mount Options:\n"
     "\n"
@@ -1147,7 +988,8 @@ void show_help (void)
     "                   disable multi-threaded operation\n"
     "\n"
     "\n"
-    "s3fs home page: <https://github.com/s3fs-fuse/s3fs-fuse>\n"
+    "Report bugs to <s3fs-devel@googlegroups.com>\n"
+    "s3fs home page: <http://code.google.com/p/s3fs/>\n"
   );
   return;
 }
@@ -1155,20 +997,11 @@ void show_help (void)
 void show_version(void)
 {
   printf(
-  "Amazon Simple Storage Service File System V%s(commit:%s) with %s\n"
+  "Amazon Simple Storage Service File System %s\n"
   "Copyright (C) 2010 Randy Rizun <rrizun@gmail.com>\n"
   "License GPL2: GNU GPL version 2 <http://gnu.org/licenses/gpl.html>\n"
   "This is free software: you are free to change and redistribute it.\n"
-  "There is NO WARRANTY, to the extent permitted by law.\n",
-  VERSION, COMMIT_HASH_VAL, s3fs_crypt_lib_name());
+  "There is NO WARRANTY, to the extent permitted by law.\n", VERSION );
   return;
 }
 
-/*
-* Local variables:
-* tab-width: 4
-* c-basic-offset: 4
-* End:
-* vim600: noet sw=4 ts=4 fdm=marker
-* vim<600: noet sw=4 ts=4
-*/
